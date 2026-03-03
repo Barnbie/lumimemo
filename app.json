@@ -1,29 +1,91 @@
 {
   "expo": {
-    "name": "LumiNote",
-    "slug": "LumiNote",
+    "name": "LumiMemo",
+    "slug": "lumiMemo-barnbie",
+    "owner": "barnbie",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "icon": "./assets/splash-screen.png",
+    "userInterfaceStyle": "dark",
     "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "image": "./assets/splash-screen1.png",
+      "resizeMode": "cover",
+      "backgroundColor": "#1a1a1a"
     },
     "ios": {
-      "supportsTablet": true
+      "bundleIdentifier": "com.lumiapps.lumimemo",
+      "buildNumber": "1.0.0",
+      "supportsTablet": true,
+      "infoPlist": {
+        "UIViewControllerBasedStatusBarAppearance": true,
+        "UIStatusBarStyle": "UIStatusBarStyleLightContent",
+        "UIStatusBarHidden": false,
+        "NSPhotoLibraryUsageDescription": "We need access to your photos to attach images to notes",
+        "NSMicrophoneUsageDescription": "We need access to your microphone to convert your speech to text",
+        "NSSpeechRecognitionUsageDescription": "We need access to speech recognition to convert your speech to text",
+        "NSCameraUsageDescription": "We need access to your camera to take photos for notes"
+      },
+      "splash": {
+        "image": "./assets/splash-screen1.png",
+        "resizeMode": "cover",
+        "backgroundColor": "#1a1a1a"
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/splash-screen.png",
+        "backgroundColor": "#1a1a1a"
       },
-      "edgeToEdgeEnabled": true
+      "package": "com.lumiapps.lumimemo",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET"
+      ],
+      "googleMobileAdsAppId": "ca-app-pub-3202559738007149~3152356415",
+      "splash": {
+        "image": "./assets/splash-screen1.png",
+        "resizeMode": "cover",
+        "backgroundColor": "#1a1a1a"
+      }
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/splash-screen.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#1a1a1a",
+          "image": "./assets/splash-screen1.png",
+          "resizeMode": "cover",
+          "imageWidth": 1080
+        }
+      ],
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-3202559738007149~3152356415"
+        }
+      ],
+      "@react-native-voice/voice",
+      "./app-config-plugin.js",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableProguardInReleaseBuilds": false,
+            "enableShrinkResourcesInReleaseBuilds": false
+          }
+        }
+      ]
+    ],
+    "scheme": "lumimemo",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "622a3f15-8008-4f5a-b329-3f3fb32767d5"
+      }
     }
   }
 }

@@ -1,0 +1,898 @@
+import { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ImageBackground,
+  TouchableOpacity,
+  TextInput,
+  Dimensions,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StatusBar,
+  Linking, 
+} from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import { Audio } from 'expo-av';
+import { RichEditor, RichToolbar, actions } from 'react-native-pell-rich-editor';
+
+
+const { width } = Dimensions.get('window');
+
+interface Note {
+  id: string;
+  title: string;
+  content: string;
+  color: string;
+  isPinned: boolean;
+  timestamp: number;
+  attachments?: Attachment[];
+}
+
+interface Attachment {
+  id: string;
+  type: 'image' | 'pdf';
+  uri: string;
+  name: string;
+}
+
+const EDITOR_THEME = {
+  dark: {
+    background: require('../../assets/dark-background.png'),
+    text: '#ffffff',
+    textSecondary: '#C1C1C1',
+    iconColor: '#fff',
+    undoRedoBg: 'rgba(42, 42, 42, 0.95)',
+  },
+  light: {
+    background: require('../../assets/light-background.png'),
+    text: '#000000',
+    textSecondary: '#666666',
+    iconColor: '#000',
+    undoRedoBg: 'rgba(217, 217, 217, 0.95)',
+  },
+};
+
+export default function NoteEditor() {
+  const router = useRouter();
+  const params = useLocalSearchParams();
+  const noteId = params.id as string;
+  const isNewNote = noteId === 'new';
+
+  const [title, setTitle] = useState('');
+  const [content, setContent] = useState('');
+  const [noteColor, setNoteColor] = useState('#373737ff');
+  const [history, setHistory] = useState<{ title: string; content: string }[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const currentTheme = isDarkMode ? EDITOR_THEME.dark : EDITOR_THEME.light;
+  const [showLinkModal, setShowLinkModal] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkText, setLinkText] = useState('');
+  const richText = useRef<RichEditor>(null);
+  const loadTheme = async () => {
+    try {
+      const savedTheme = await AsyncStorage.getItem('theme');
+      if (savedTheme !== null) {
+        setIsDarkMode(savedTheme === 'dark');
+      }
+    } catch (error) {
+      console.error('Error loading theme:', error);
+    }
+  };
+
+  const loadNote = async () => {
+    try {
+      const savedNotes = await AsyncStorage.getItem('notes');
+      if (savedNotes) {
+        const notes: Note[] = JSON.parse(savedNotes);
+        const note = notes.find((n) => n.id === noteId);
+        if (note) {
+          setTitle(note.title);
+          setContent(note.content);
+          setNoteColor(note.color);
+          setAttachments(note.attachments || []);
+          setHistory([{ title: note.title, content: note.content }]);
+          setHistoryIndex(0);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading note:', error);
+    }
+  };
+
+  const requestMicrophonePermission = async () => {
+    try {
+      if (Platform.OS === 'android') {
+        const { status } = await Audio.requestPermissionsAsync();
+        if (status === 'granted') {
+          console.log('Microphone permission granted');
+        } else {
+          console.log('Microphone permission denied');
+        }
+      }
+    } catch (err) {
+      console.warn('Permission error:', err);
+    }
+  };
+
+  // Main useEffect
+  useEffect(() => {
+    loadTheme();
+    if (!isNewNote) {
+      loadNote();
+    } else {
+      setHistory([{ title: '', content: '' }]);
+      setHistoryIndex(0);
+    }
+    
+    requestMicrophonePermission();
+
+    const { Keyboard } = require('react-native');
+    const showSubscription = Keyboard.addListener('keyboardDidShow', (e: any) => {
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
+
+  const saveNote = async () => {
+    try {
+      const savedNotes = await AsyncStorage.getItem('notes');
+      const notes: Note[] = savedNotes ? JSON.parse(savedNotes) : [];
+      
+      // Get HTML content from rich editor
+      const htmlContent = await richText.current?.getContentHtml();
+
+      if (isNewNote) {
+        const newNote: Note = {
+          id: Date.now().toString(),
+          title: title || 'Untitled',
+          content: htmlContent || '',  // ← Now saving HTML instead of plain text
+          color: noteColor,
+          isPinned: false,
+          timestamp: Date.now(),
+          attachments: attachments,
+        };
+        notes.unshift(newNote);
+      } else {
+        const noteIndex = notes.findIndex((n) => n.id === noteId);
+        if (noteIndex !== -1) {
+          notes[noteIndex] = {
+            ...notes[noteIndex],
+            title: title || 'Untitled',
+            content: htmlContent || '',  // ← Now saving HTML
+            timestamp: Date.now(),
+            attachments: attachments,
+          };
+        }
+      }
+
+      await AsyncStorage.setItem('notes', JSON.stringify(notes));
+      router.back();
+    } catch (error) {
+      console.error('Error saving note:', error);
+    }
+  };
+
+  const addToHistory = (newTitle: string, newContent: string) => {
+    const newHistory = history.slice(0, historyIndex + 1);
+    newHistory.push({ title: newTitle, content: newContent });
+    setHistory(newHistory);
+    setHistoryIndex(newHistory.length - 1);
+  };
+
+  const handleTitleChange = (text: string) => {
+    setTitle(text);
+    addToHistory(text, content);
+  };
+
+
+  const undo = () => {
+    if (historyIndex > 0) {
+      const newIndex = historyIndex - 1;
+      setHistoryIndex(newIndex);
+      setTitle(history[newIndex].title);
+      setContent(history[newIndex].content);
+    }
+  };
+
+  const redo = () => {
+    if (historyIndex < history.length - 1) {
+      const newIndex = historyIndex + 1;
+      setHistoryIndex(newIndex);
+      setTitle(history[newIndex].title);
+      setContent(history[newIndex].content);
+    }
+  };
+
+  const canUndo = historyIndex > 0;
+  const canRedo = historyIndex < history.length - 1;
+
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      alert('Please grant photo library access');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: false,
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      const newAttachment: Attachment = {
+        id: Date.now().toString(),
+        type: 'image',
+        uri: result.assets[0].uri,
+        name: `Image_${Date.now()}.jpg`,
+      };
+      setAttachments([...attachments, newAttachment]);
+    }
+  };
+
+  const pickPDF = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf',
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) return;
+
+      const file = result.assets?.[0];
+      if (!file) return;
+
+      const newAttachment: Attachment = {
+        id: Date.now().toString(),
+        type: 'pdf',
+        uri: file.uri,
+        name: file.name ?? 'Document.pdf',
+      };
+
+      setAttachments(prev => [...prev, newAttachment]);
+    } catch (error) {
+      console.error('Error picking PDF:', error);
+    }
+  };
+
+  
+
+  const insertBulletList = () => {
+    richText.current?.insertHTML('<ul><li></li></ul>');
+  };
+
+  const insertNumberedList = () => {
+    richText.current?.insertHTML('<ol><li></li></ol>');
+  };
+
+  const insertCheckList = () => {
+    richText.current?.insertHTML('<div>☐ </div>');
+  };
+
+  const insertLink = () => {
+  setShowLinkModal(true);
+};
+
+const addLink = () => {
+    if (!linkUrl.trim()) {
+      alert('Please enter a URL');
+      return;
+    }
+
+    const displayText = linkText.trim() || linkUrl;
+    let fullUrl = linkUrl.trim();
+    
+    // Add https:// if no protocol
+    if (!fullUrl.startsWith('http://') && !fullUrl.startsWith('https://')) {
+      fullUrl = 'https://' + fullUrl;
+    }
+
+    // Insert the link into the editor
+    richText.current?.insertLink(displayText, fullUrl);
+
+    setLinkUrl('');
+    setLinkText('');
+    setShowLinkModal(false);
+    
+    setTimeout(() => {
+      richText.current?.focusContentEditor();
+    }, 100);
+  };
+
+
+
+  const [cursorPosition, setCursorPosition] = useState(0);
+
+const toggleCheckbox = () => {
+  const lines = content.split('\n');
+  
+  // Find which line the cursor is on
+  let charCount = 0;
+  let currentLineIndex = 0;
+  
+  for (let i = 0; i < lines.length; i++) {
+    charCount += lines[i].length + 1; // +1 for newline
+    if (charCount >= cursorPosition) {
+      currentLineIndex = i;
+      break;
+    }
+  }
+  
+  // Check the current line
+  const currentLine = lines[currentLineIndex];
+  
+  if (currentLine.includes('☐')) {
+    lines[currentLineIndex] = currentLine.replace('☐', '☑');
+  } else if (currentLine.includes('☑')) {
+    lines[currentLineIndex] = currentLine.replace('☑', '☐');
+  } else {
+    // If current line has no checkbox, find the closest one
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].includes('☐')) {
+        lines[i] = lines[i].replace('☐', '☑');
+        break;
+      } else if (lines[i].includes('☑')) {
+        lines[i] = lines[i].replace('☑', '☐');
+        break;
+      }
+    }
+  }
+  
+  const newContent = lines.join('\n');
+  setContent(newContent);
+  addToHistory(title, newContent);
+};
+
+  const removeAttachment = (id: string) => {
+    setAttachments(attachments.filter(att => att.id !== id));
+  };
+
+  const shareNote = async () => {
+    try {
+      const { Share } = require('react-native');
+      const message = `${title || 'Untitled'}\n\n${content}`;
+      await Share.share({
+        message: message,
+        title: title || 'My Note',
+      });
+    } catch (error) {
+      console.error('Error sharing note:', error);
+    }
+  };
+
+  return (
+    <View style={[styles.container, { backgroundColor: isDarkMode ? '#1a1a1a' : '#f5f5f5' }]}>
+      <StatusBar 
+        barStyle={isDarkMode ? "light-content" : "dark-content"}
+        backgroundColor="transparent"
+        translucent={true}
+      />
+      <ImageBackground
+        source={currentTheme.background}
+        style={StyleSheet.absoluteFillObject}
+        resizeMode="cover"
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.keyboardView}
+        >
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+              <Image
+                source={require('../../assets/back.png')}
+                style={[styles.backIcon, { tintColor: currentTheme.iconColor }]}
+                resizeMode="contain"
+              />
+            </TouchableOpacity>
+
+            <View style={styles.headerRight}>
+              <TouchableOpacity style={styles.headerButton} onPress={shareNote}>
+                <Image
+                  source={require('../../assets/share.png')}
+                  style={[styles.headerIcon, { tintColor: currentTheme.iconColor }]}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.doneButton} onPress={saveNote}>
+                <Image
+                  source={require('../../assets/done.png')}
+                  style={styles.doneIcon}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <ScrollView
+            style={styles.editorContainer}
+            contentContainerStyle={styles.editorContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <TextInput
+              style={[styles.titleInput, { color: currentTheme.text }]}
+              placeholder="Heading"
+              placeholderTextColor={isDarkMode ? '#666' : '#999'}
+              value={title}
+              onChangeText={handleTitleChange}
+              multiline
+              autoFocus={isNewNote}
+            />
+
+            {attachments.length > 0 && (
+              <View style={styles.attachmentsContainer}>
+                {attachments.map((att) => (
+                  <View key={att.id} style={styles.attachmentItem}>
+                    {att.type === 'image' && (
+                      <Image source={{ uri: att.uri }} style={styles.attachmentImage} />
+                    )}
+                    {att.type === 'pdf' && (
+                      <View style={styles.pdfAttachment}>
+                        <Text style={[styles.pdfText, { color: currentTheme.text }]}>📄 {att.name}</Text>
+                      </View>
+                    )}
+                    
+                    <TouchableOpacity
+                      style={styles.removeAttachment}
+                      onPress={() => removeAttachment(att.id)}
+                    >
+                      <Text style={styles.removeText}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+
+ <RichEditor
+  ref={richText}
+  initialContentHTML={content}
+  onChange={(html) => {
+    setContent(html);
+    addToHistory(title, html);
+  }}
+  placeholder="Start typing..."
+  style={styles.richEditor}
+  initialHeight={400}
+  editorStyle={{
+    backgroundColor: 'transparent',
+    color: currentTheme.textSecondary,
+    placeholderColor: isDarkMode ? '#666' : '#999',
+    contentCSSText: `
+      font-size: 16px;
+      line-height: 24px;
+      color: ${currentTheme.textSecondary};
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      padding: 0;
+      margin: 0;
+      a {
+        color: #2970dcff;
+        text-decoration: underline;
+      }
+      a:focus, a:active {
+        outline: none !important;
+        background-color: transparent !important;
+        box-shadow: none !important;
+      }
+    `,
+  }}
+  onLink={(url) => {
+    Linking.openURL(url).catch((err) => console.error('Failed to open URL:', err));
+  }}
+/>
+
+          </ScrollView>
+
+          <View style={styles.bottomButtonsContainer}>
+            <View style={[styles.toolbar, { backgroundColor: currentTheme.undoRedoBg }]}>
+              <TouchableOpacity style={styles.toolButton} onPress={pickImage}>
+                <Image
+                  source={require('../../assets/image.png')}
+                  style={[styles.toolIconImage, { tintColor: currentTheme.iconColor }]}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.toolButton} onPress={pickPDF}>
+                <Image
+                  source={require('../../assets/docs.png')}
+                  style={[styles.toolIconImage, { tintColor: currentTheme.iconColor }]}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.toolButton} onPress={insertCheckList}>
+                <Text style={[styles.toolIcon, { color: currentTheme.text }]}>☐</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.toolButton} onPress={toggleCheckbox}>
+                <Text style={[styles.toolIcon, { color: currentTheme.text }]}>✓</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.toolButton} onPress={insertBulletList}>
+                <Image
+                  source={require('../../assets/bullet_list.png')}
+                  style={[styles.toolIconImage, { tintColor: currentTheme.iconColor }]}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.toolButton} onPress={insertNumberedList}>
+                <Image
+                  source={require('../../assets/numbered_list.png')}
+                  style={[styles.toolIconImage, { tintColor: currentTheme.iconColor }]}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.toolButton} onPress={insertLink}>
+                <Image
+                  source={require('../../assets/link.png')}
+                  style={[styles.toolIconImage, { tintColor: currentTheme.iconColor }]}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.undoRedoContainer, { backgroundColor: currentTheme.undoRedoBg }]}>
+              <TouchableOpacity
+                style={[styles.undoRedoButton, !canUndo && styles.disabledButton]}
+                onPress={undo}
+                disabled={!canUndo}
+              >
+                <Image
+                  source={require('../../assets/undo.png')}
+                  style={[styles.undoRedoIcon, !canUndo && styles.disabledIcon, { tintColor: currentTheme.iconColor }]}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.undoRedoButton, !canRedo && styles.disabledButton]}
+                onPress={redo}
+                disabled={!canRedo}
+              >
+                <Image
+                  source={require('../../assets/redo.png')}
+                  style={[styles.undoRedoIcon, !canRedo && styles.disabledIcon, { tintColor: currentTheme.iconColor }]}
+                  resizeMode="contain"
+               />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+
+      {/* Link Modal - ADD IT HERE */}
+      {showLinkModal && (
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity 
+            style={styles.modalBackground}
+            activeOpacity={1}
+            onPress={() => {
+              setShowLinkModal(false);
+              setLinkUrl('');
+              setLinkText('');
+            }}
+          />
+          
+          <View style={[styles.linkModal, { backgroundColor: currentTheme.undoRedoBg }]}>
+            <Text style={[styles.linkModalTitle, { color: currentTheme.text }]}>Add Link</Text>
+            
+            <TextInput
+              style={[styles.linkInput, { 
+                color: currentTheme.text,
+                borderColor: currentTheme.text 
+              }]}
+              placeholder="Link text (e.g., Lumi Note)"
+              placeholderTextColor={isDarkMode ? '#666' : '#999'}
+              value={linkText}
+              onChangeText={setLinkText}
+              autoFocus
+            />
+            
+            <TextInput
+              style={[styles.linkInput, { 
+                color: currentTheme.text,
+                borderColor: currentTheme.text 
+              }]}
+              placeholder="URL (e.g., https://luminote.com)"
+              placeholderTextColor={isDarkMode ? '#666' : '#999'}
+              value={linkUrl}
+              onChangeText={setLinkUrl}
+              keyboardType="url"
+              autoCapitalize="none"
+            />
+            
+            <View style={styles.linkModalButtons}>
+              <TouchableOpacity 
+                style={[styles.linkModalButton, styles.cancelButton]}
+                onPress={() => {
+                  setShowLinkModal(false);
+                  setLinkUrl('');
+                  setLinkText('');
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.linkModalButton, styles.addButton]}
+                onPress={addLink}
+              >
+                <Text style={styles.addButtonText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
+
+    </ImageBackground>
+  </View>
+);
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  keyboardView: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 60,
+    paddingBottom: 16,
+  },
+  headerButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerIcon: {
+    width: 24,
+    height: 24,
+  },
+  backButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'transparent',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  backIcon: {
+    width: 40,
+    height: 40,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  doneButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#0024CA',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  doneIcon: {
+    width: 24,
+    height: 24,
+    tintColor: '#fff',
+  },
+  editorContainer: {
+    flex: 1,
+  },
+  editorContent: {
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 40,
+  },
+  titleInput: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 24,
+    paddingVertical: 8,
+  },
+  contentInput: {
+    fontSize: 16,
+    lineHeight: 24,
+    minHeight: 400,
+  },
+  richEditor: {
+    minHeight: 400,
+    backgroundColor: 'transparent',
+  },
+  undoRedoContainer: {
+    flexDirection: 'row',
+    gap: 6,
+    borderRadius: 25,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  undoRedoButton: {
+    width: 30,
+    height: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 15,
+  },
+  undoRedoIcon: {
+    width: 25,
+    height: 25,
+  },
+  disabledButton: {
+    opacity: 0.3,
+  },
+  disabledIcon: {
+    opacity: 0.3,
+  },
+  attachmentsContainer: {
+    marginBottom: 16,
+  },
+  attachmentItem: {
+    marginBottom: 12,
+    position: 'relative',
+  },
+  attachmentImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    resizeMode: 'cover',
+  },
+  pdfAttachment: {
+    padding: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 12,
+  },
+  pdfText: {
+    fontSize: 14,
+  },
+  removeAttachment: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  removeText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  bottomButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingBottom: Platform.OS === 'ios' ? 20 : 10,
+  },
+  toolbar: {
+    flexDirection: 'row',
+    gap: 0,
+    borderRadius: 25,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  toolButton: {
+    width: 34,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 18,
+  },
+  toolIconImage: {
+    width: 18,
+    height: 18,
+  },
+  toolIcon: {
+    fontSize: 20,
+  },
+  recordingButton: {
+    backgroundColor: 'rgba(255, 0, 0, 0.2)',
+  },
+  modalOverlay: {
+  position: 'absolute',
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 80,
+  justifyContent: 'center',
+  alignItems: 'center',
+  zIndex: 1000,
+},
+modalBackground: {
+  position: 'absolute',
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+  backgroundColor: 'rgba(0, 0, 0, 0.5)',
+},
+linkModal: {
+  width: width - 60,
+  padding: 24,
+  borderRadius: 50,
+  zIndex: 1001,
+},
+linkModalTitle: {
+  fontSize: 20,
+  fontWeight: 'bold',
+  marginBottom: 20,
+  textAlign: 'center',
+},
+linkInput: {
+  borderWidth: 1,
+  borderRadius: 50,
+  padding: 12,
+  marginBottom: 16,
+  fontSize: 16,
+},
+linkModalButtons: {
+  flexDirection: 'row',
+  gap: 12,
+  marginTop: 8,
+},
+linkModalButton: {
+  flex: 1,
+  paddingVertical: 12,
+  borderRadius: 50,
+  alignItems: 'center',
+},
+cancelButton: {
+  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+},
+cancelButtonText: {
+  color: '#fff',
+  fontSize: 16,
+  fontWeight: '600',
+},
+addButton: {
+  backgroundColor: '#0024CA',
+},
+addButtonText: {
+  color: '#fff',
+  fontSize: 16,
+  fontWeight: '600',
+},
+});
